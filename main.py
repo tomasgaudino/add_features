@@ -26,4 +26,4 @@ features_dict = {
 
 ft = Features()
 features_df = ft.add_features(df, features_dict)
-features_df.info()
+features_df.to_csv('test_features.csv')

@@ -131,7 +131,7 @@ class Features:
                 elif isinstance(feature['down_thold'], str):
                     down_thold = df[feature['down_thold']]
 
-                df[memory], df[side] = self.crossover(base=df[feature['base']],
+                df[side], df[memory] = self.crossover(base=df[feature['base']],
                                                  upper_thold=upper_thold,
                                                  upper_side=feature['upper_side'],
                                                  down_thold=down_thold,
