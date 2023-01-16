@@ -2,12 +2,64 @@ import pandas_ta as ta
 import pandas as pd
 import numpy as np
 from enum import Enum
+from math import pi
+from itertools import chain
 
 
 class PositionSide(Enum):
     LONG = 1
     SHORT = -1
     NEUTRAL = 0
+
+
+def intersection(
+        x: pd.Series,
+        y1: pd.Series,
+        y2: pd.Series,
+        y1_breakup: PositionSide,
+        y2_breakup: PositionSide
+):
+    # If macd is greater than signal 1, else 0
+    cross_signal = pd.Series(np.where((y1 == np.nan) | (y2 == np.nan),
+                                      0,
+                                      np.where(y1 > y2, 1.0, 0.0)))
+    # If last macd_cross_signal != current signal then it's a cross
+    cross_event = pd.Series(np.where(cross_signal != cross_signal.shift(1), 1, 0))
+    cross_side = pd.Series(np.where((y1 > y2) & (cross_event > 0), y1_breakup.value,
+                                    np.where((y1 < y2) & (cross_event > 0), y2_breakup.value, PositionSide.NEUTRAL.value)))
+
+    x = pd.to_datetime(x)
+
+    x_prev = x.shift()
+    y1_prev = y1.shift()
+    y2_prev = y2.shift()
+
+    df = pd.concat([x, y1, y2, x_prev, y1_prev, y2_prev, cross_event, cross_side], axis=1)
+    df.columns = ['x', 'y1', 'y2', 'x_prev', 'y1_prev', 'y2_prev', 'cross_event', 'cross_side']
+
+    df['tan_1'] = np.where(df['cross_event'] > 0,
+                           (df['y1'] - df['y1_prev']) / (df['x'] - df['x_prev']).dt.total_seconds().div(60), 0)
+    df['alpha_1'] = np.arctan(df['tan_1'])
+
+    df['tan_2'] = np.where(df['cross_event'] > 0,
+                           (df['y2'] - df['y2_prev']) / (df['x'] - df['x_prev']).dt.total_seconds().div(60), 0)
+    df['alpha_2'] = np.arctan(df['tan_2'])
+
+    df['alpha'] = np.where(
+        (df['alpha_1'] * df['alpha_2'] < 0),
+        abs(df['alpha_1']) + abs(df['alpha_2']),
+        np.where(
+            df['alpha_1'] * df['alpha_2'] > 0,
+            abs(df[['alpha_1', 'alpha_2']]).max(axis=1) - abs(df[['alpha_1', 'alpha_2']]).min(axis=1), 0))
+    #####
+    df['value'] = np.where(
+        df['cross_side'] == PositionSide.SHORT.value,
+        -df['alpha'] / pi,
+        np.where(
+            df['cross_side'] == PositionSide.LONG.value,
+            df['alpha'] / pi,
+            0))
+    return df['cross_event'], df['alpha'], df['value'], df['cross_side']
 
 
 def crossover(
@@ -19,10 +71,10 @@ def crossover(
     df = pd.concat([base, upper_thold, down_thold], axis=1)
 
     df['side'] = np.where(base < down_thold,
-                          down_side,
+                          down_side.value,
                           np.where(base > upper_thold,
-                                   upper_side,
-                                   PositionSide.NEUTRAL))
+                                   upper_side.value,
+                                   PositionSide.NEUTRAL.value))
 
     df['memory'] = df.groupby((df['side'] != df['side'].shift()).cumsum())['side'].cumcount()
 
@@ -37,55 +89,79 @@ def add_features(df: pd.DataFrame, features_dict):
         for feature, indicator in features_dict.items()}
 
     features_crossover = [feature for group in features['crossover'] for feature in group]
+    features_intersection = [feature for group in features['intersection'] for feature in group]
+    all_features = features_crossover + features_intersection
     ta_strategy = ta.Strategy(
         name="RMB",
-        ta=features_crossover
+        ta=all_features
     )
 
     df.ta.strategy(ta_strategy)
 
-    add_features_dict = [dict(feature, **{'kind': indicator_name}) for indicator_name, features in
-                         features_dict['crossover'].items() for feature in features]
+    add_features_dict = list()
+    add_features_dict.append([[dict(feature, **{'kind': indicator_name, 'indicator_type': indicator_type}) for indicator_name, features in
+                               features_dict[indicator_type].items() for feature in features] for indicator_type in features_dict.keys()])
 
-    for feature in add_features_dict:
+    for feature in list(chain.from_iterable(add_features_dict[0])):
         # Build base and tholds names
+        if feature['indicator_type'] == 'crossover':
+            # rsi
+            if feature['kind'] == 'rsi':
+                feature['name'] = feature['base'] = 'RSI_{}'.format(feature['config']['length'])
+            # bbands
+            if feature['kind'] == 'bbands':
+                feature['base'] = 'close'
+                std = feature['config'].get('std', '2.0')
+                feature['name'] = 'BB_{}_{}'.format(feature['config']['length'], std)
+                feature['upper_thold'] = 'BBU_{}_{}'.format(feature['config']['length'], std)
+                feature['down_thold'] = 'BBL_{}_{}'.format(feature['config']['length'], std)
 
-        # rsi
-        if feature['kind'] == 'rsi':
-            feature['name'] = feature['base'] = 'RSI_{}'.format(feature['config']['length'])
-        # bbands
-        if feature['kind'] == 'bbands':
-            feature['base'] = 'close'
-            std = feature['config'].get('std', '2.0')
-            feature['name'] = 'BB_{}_{}'.format(feature['config']['length'], std)
-            feature['upper_thold'] = 'BBU_{}_{}'.format(feature['config']['length'], std)
-            feature['down_thold'] = 'BBL_{}_{}'.format(feature['config']['length'], std)
+            # Run crossover and append to df
+            memory = feature['name'] + '_MEMO'
+            side = feature['name'] + '_SIDE'
 
-        # Run crossover and append to df
-        memory = feature['name'] + '_MEMO'
-        side = feature['name'] + '_SIDE'
+            if isinstance(feature['upper_thold'], int):
+                upper_thold = pd.Series(feature['upper_thold'], index=np.arange(len(df)))
+            elif isinstance(feature['upper_thold'], str):
+                upper_thold = df[feature['upper_thold']]
 
-        if isinstance(feature['upper_thold'], int):
-            upper_thold = pd.Series(feature['upper_thold'], index=np.arange(len(df)))
-        elif isinstance(feature['upper_thold'], str):
-            upper_thold = df[feature['upper_thold']]
+            if isinstance(feature['down_thold'], int):
+                down_thold = pd.Series(feature['down_thold'], index=np.arange(len(df)))
+            elif isinstance(feature['down_thold'], str):
+                down_thold = df[feature['down_thold']]
 
-        if isinstance(feature['down_thold'], int):
-            down_thold = pd.Series(feature['down_thold'], index=np.arange(len(df)))
-        elif isinstance(feature['down_thold'], str):
-            down_thold = df[feature['down_thold']]
+            df[memory], df[side] = crossover(base=df[feature['base']],
+                                             upper_thold=upper_thold,
+                                             upper_side=feature['upper_side'],
+                                             down_thold=down_thold,
+                                             down_side=feature['down_side']
+                                             )
 
-        df[memory], df[side] = crossover(base=df[feature['base']],
-                                         upper_thold=upper_thold,
-                                         upper_side=feature['upper_side'],
-                                         down_thold=down_thold,
-                                         down_side=feature['down_side']
-                                         )
+        elif feature['indicator_type'] == 'intersection':
+            # macd
+            if feature['kind'] == 'macd':
+                feature['series1'] = feature['name'] = 'MACD_{}_{}_{}'.format(feature['config']['fast'],
+                                                                              feature['config']['slow'],
+                                                                              feature['config']['signal'])
+                feature['series2'] = 'MACDs_{}_{}_{}'.format(feature['config']['fast'], feature['config']['slow'],
+                                                             feature['config']['signal'])
+
+            # Run crossover and append to df
+            alpha = feature['name'] + '_ALPHA'
+            side = feature['name'] + '_SIDE'
+            value = feature['name'] + '_VALUE'
+            cross = feature['name'] + '_CROSS'
+
+            df[alpha], df[side], df[value], df[cross] = intersection(df['time'], df[feature['series1']],
+                                                                     df[feature['series2']],
+                                                                     feature['series1_breakup_side'],
+                                                                     feature['series2_breakup_side'])
 
     return df
 
 
-ohlc = pd.read_csv('./data/btc_1min.csv')
+df = pd.read_csv('./data/btc_1min.csv')
+
 features_dict = {
     'crossover': {
         'rsi': [
@@ -95,16 +171,17 @@ features_dict = {
         ],
         'bbands': [
             {'upper_side': PositionSide.SHORT, 'down_side': PositionSide.LONG, 'config': {'length': 20}},
-            {'upper_side': PositionSide.SHORT, 'down_side': PositionSide.LONG, 'config': {'length': 30, 'mamode': 't3'}},
+            {'upper_side': PositionSide.SHORT, 'down_side': PositionSide.LONG, 'config': {'length': 30, 'mamode':'t3'}},
         ]
     },
     'intersection': {
         'macd': [
-            {'series1': 'MACD_{}_{}', 'series1_breakup_side': PositionSide.LONG, 'series2': 'MACDs_{}_{}', 'series2_breakup_side': PositionSide.SHORT, 'config': {'length': 30}}
+            {'series1_breakup_side': PositionSide.LONG, 'series2_breakup_side': PositionSide.SHORT, 'config': {"fast": 12, "slow": 26, "signal": 9}},
+            {'series1_breakup_side': PositionSide.LONG, 'series2_breakup_side': PositionSide.SHORT, 'config': {"fast": 15, "slow": 30, "signal": 12}},
+            {'series1_breakup_side': PositionSide.LONG, 'series2_breakup_side': PositionSide.SHORT, 'config': {"fast": 18, "slow": 34, "signal": 15}},
         ]
     }
 }
 
-features_df = add_features(ohlc, features_dict)
-
-a=1
+features_df = add_features(df, features_dict)
+features_df.info()
