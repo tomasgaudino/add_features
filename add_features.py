@@ -81,7 +81,7 @@ def crossover(
     return df['side'], df['memory']
 
 
-def add_features(df: pd.DataFrame, features_dict):
+def add_features(df: pd.DataFrame, features_dict, dropna=False):
     features = {
         feature: [
             [dict(config['config'], **{'kind': indicator_name}) for config in configs]
@@ -157,7 +157,10 @@ def add_features(df: pd.DataFrame, features_dict):
                                                                      feature['series1_breakup_side'],
                                                                      feature['series2_breakup_side'])
 
-    return df
+    if dropna:
+        return df.dropna()
+    else:
+        return df
 
 
 df = pd.read_csv('./data/btc_1min.csv')
