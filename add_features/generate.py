@@ -152,8 +152,7 @@ class Features:
                 side = feature['name'] + '_SIDE'
                 value = feature['name'] + '_VALUE'
                 cross = feature['name'] + '_CROSS'
-
-                df[alpha], df[side], df[value], df[cross] = self.intersection(df['time'], df[feature['series1']],
+                df[cross], df[alpha], df[value], df[side] = self.intersection(df['time'], df[feature['series1']],
                                                                          df[feature['series2']],
                                                                          feature['series1_breakup_side'],
                                                                          feature['series2_breakup_side'])
