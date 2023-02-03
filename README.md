@@ -1,9 +1,25 @@
-This project is in development stage ⌛ but it has some features that you can start using right now!
+<h1>Experimental Project</h1>
+<p>This project is still in its experimental phase, and while we are working hard to improve it, it may still contain bugs.
 
+We believe this project has great potential, and we are committed to continuously improving it. If you'd like to help us on this journey, we'd love for you to collaborate with us! Whether you're a seasoned developer or just starting out, there's a place for you here.
 
-<h2>Step 1: Build you own set of indicators. There are two supported kind of indicators: crossover and intersectionable </h2>
+Please feel free to open issues for bug reports or feature requests, and we'll do our best to address them as soon as possible. We welcome all contributions, from small bug fixes to major feature enhancements. Let's build something amazing together!</p>
 
-<code> features_dict = {
+<h1>OHLC Features Transformation Project</h1>
+<p>This project is focused on transforming an [Open, High, Low, Close (OHLC)] financial time series data into meaningful features using a customizable features_dict. The features_dict allows you to define different technical indicators and configurations for each indicator.
+
+The core class, OHLCFeatures, accepts an OHLC data and the features_dict as input and returns the computed features for each indicator. The computed features can be used for further analysis and trading strategy development. The project leverages the power of the pandas_ta library for calculating technical indicators.</p>
+
+<h2>Usage</h2>
+<p>The features_dict is a dictionary that consists of two keys, crossover and intersection. The crossover key holds configurations for crossover indicators such as Relative Strength Index (RSI) and Bollinger Bands (BBands), while the intersection key holds configurations for intersection indicators such as Moving Average Convergence Divergence (MACD).
+
+Here is an example of a usage:</p>
+<pre>import pandas as pd
+from add_features.generate import Features, PositionSide
+
+df = pd.read_csv('data/btc_1min.csv')
+
+features_dict = {
     'crossover': {
         'rsi': [
             {'upper_thold': 70, 'upper_side': PositionSide.SHORT, 'down_thold': 30, 'down_side': PositionSide.LONG, 'config': {'length': 14}},
@@ -23,17 +39,14 @@ This project is in development stage ⌛ but it has some features that you can s
         ]
     }
 }
-</code>
+ft = Features()
+features_df = ft.add_features(df, features_dict)
+features_df.to_csv('test_features.csv')</pre>
 
-<h2>Step 2: Choose your OHLC file</h2>
+<h2>Visualize</h2>
+<p>Every feature generated from the project can be visualized and tested in a Streamlit dashboard. Currently, only MACD, RSI and Bollinger Bands are supported, but the number of supported indicators can keep growing. You can participate and help the project to keep growing too!
 
-In example.py there is a .csv file containing 1min candles from btc-usdt
-
-<h2>Step 3: Run streamlit app to visualize your features</h2>
-
-<code>streamlit run Main_page.py</code>
-
-<h2>Step 4: Check different indicators, i.e.: RSI, MACD, BOLLINGER</h2>
+Some screenshots:</p>
 
 ![image](https://user-images.githubusercontent.com/69804854/214636300-10beff0b-4857-41e8-a1c8-b5fc224adb60.png)
 
